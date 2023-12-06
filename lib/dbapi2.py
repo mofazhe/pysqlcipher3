@@ -26,6 +26,7 @@
 import datetime
 import sys
 import time
+import decimal
 
 if sys.version_info[0] < 3:
     from pysqlcipher3._sqlite import *
@@ -98,6 +99,7 @@ def register_adapters_and_converters():
         return val
 
 
+    register_adapter(decimal.Decimal, str)
     register_adapter(datetime.date, adapt_date)
     register_adapter(datetime.datetime, adapt_datetime)
     register_converter("date", convert_date)
