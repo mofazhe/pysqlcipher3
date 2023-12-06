@@ -830,26 +830,93 @@ static void _pysqlite_drop_unused_cursor_references(pysqlite_Connection* self)
     self->cursors = new_list;
 }
 
+// PyObject* pysqlite_connection_create_function(pysqlite_Connection* self, PyObject* args, PyObject* kwargs)
+// {
+//     static char *kwlist[] = {"name", "narg", "func", NULL, NULL};
+
+//     PyObject* func;
+//     char* name;
+//     int narg;
+//     int rc;
+
+//     if (!pysqlite_check_thread(self) || !pysqlite_check_connection(self)) {
+//         return NULL;
+//     }
+
+//     if (!PyArg_ParseTupleAndKeywords(args, kwargs, "siO", kwlist,
+//                                      &name, &narg, &func))
+//     {
+//         return NULL;
+//     }
+
+//     rc = sqlite3_create_function(self->db, name, narg, SQLITE_UTF8, (void*)func, _pysqlite_func_callback, NULL, NULL);
+
+//     if (rc != SQLITE_OK) {
+//         /* Workaround for SQLite bug: no error code or string is available here */
+//         PyErr_SetString(pysqlite_OperationalError, "Error creating function");
+//         return NULL;
+//     } else {
+//         if (PyDict_SetItem(self->function_pinboard, func, Py_None) == -1)
+//             return NULL;
+
+//         Py_INCREF(Py_None);
+//         return Py_None;
+//     }
+// }
+
+// Copy and edit from https://github.com/coleifer/pysqlite3
+static void _destructor(void* args)
+{
+    Py_DECREF((PyObject *)args);
+}
+
+// Copy and edit from https://github.com/coleifer/pysqlite3 commit:162e967dc69e1fe44e7b6466f5cbf846a5080b48 file:src/connection.c
+// Make it compatible with parameter deterministic
 PyObject* pysqlite_connection_create_function(pysqlite_Connection* self, PyObject* args, PyObject* kwargs)
 {
-    static char *kwlist[] = {"name", "narg", "func", NULL, NULL};
+    static char *kwlist[] = {"name", "narg", "func", "deterministic", NULL};
 
     PyObject* func;
     char* name;
     int narg;
     int rc;
+    int deterministic = 0;
+    int flags = SQLITE_UTF8;
 
     if (!pysqlite_check_thread(self) || !pysqlite_check_connection(self)) {
         return NULL;
     }
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "siO", kwlist,
-                                     &name, &narg, &func))
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "siO|p", kwlist,
+                                     &name, &narg, &func, &deterministic))
     {
         return NULL;
     }
 
-    rc = sqlite3_create_function(self->db, name, narg, SQLITE_UTF8, (void*)func, _pysqlite_func_callback, NULL, NULL);
+    if (deterministic) {
+#if SQLITE_VERSION_NUMBER < 3008003
+        PyErr_SetString(pysqlite_NotSupportedError,
+                        "deterministic=True requires SQLite 3.8.3 or higher");
+        return NULL;
+#else
+        if (sqlite3_libversion_number() < 3008003) {
+            PyErr_SetString(pysqlite_NotSupportedError,
+                            "deterministic=True requires SQLite 3.8.3 or higher");
+            return NULL;
+        }
+        flags |= SQLITE_DETERMINISTIC;
+#endif
+    }
+    Py_INCREF(func);
+    rc = sqlite3_create_function_v2(self->db,
+                                    name,
+                                    narg,
+                                    flags,
+                                    (void*)func,
+                                    _pysqlite_func_callback,
+                                    NULL,
+                                    NULL,
+                                    &_destructor);
 
     if (rc != SQLITE_OK) {
         /* Workaround for SQLite bug: no error code or string is available here */
@@ -862,6 +929,7 @@ PyObject* pysqlite_connection_create_function(pysqlite_Connection* self, PyObjec
         Py_INCREF(Py_None);
         return Py_None;
     }
+    // Py_RETURN_NONE;
 }
 
 PyObject* pysqlite_connection_create_aggregate(pysqlite_Connection* self, PyObject* args, PyObject* kwargs)
